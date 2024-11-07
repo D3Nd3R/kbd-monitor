@@ -4,6 +4,7 @@
 #include <atomic>
 #include <csignal>
 #include <iostream>
+#include <map>
 #include <thread>
 
 namespace
@@ -46,6 +47,12 @@ int main(int argc, char* argv[])
     AssignSignalHandler();
 
     kbd_monitor::KeyboardMonitor monitor { argv[1] };
+    monitor.RegisterEventCallback(
+        [](kbd_monitor::KeyboardMonitor::Event&& event) -> void
+        {
+            static const std::array<std::string, 3> eventsNames { "RELEASED", "PRESSED ", "REPEATED" };
+            std::cout << eventsNames[event.type] << "\tkey code: " << event.code << std::endl;
+        });
     if (!monitor.Start())
     {
         std::cerr << "Failed to start monitor." << std::endl;

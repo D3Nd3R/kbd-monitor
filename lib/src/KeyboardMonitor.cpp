@@ -23,7 +23,7 @@ namespace kbd_monitor
 {
 
 KeyboardMonitor::KeyboardMonitor(const std::filesystem::path& keyboardDescriptor)
-    : _keyboardDescriptor { keyboardDescriptor }
+    : _keyboardDescriptor { std::filesystem::absolute(keyboardDescriptor) }
 {
 }
 
@@ -32,12 +32,20 @@ bool KeyboardMonitor::Start()
     Stop();
 
     if (!std::filesystem::exists(_keyboardDescriptor))
-        return false;
-
-    details::FileDescriptor fd { ::open(std::filesystem::absolute(_keyboardDescriptor).c_str(), O_RDONLY) };
-    if (static_cast<int>(fd) < 0)
     {
-        std::cerr << "Failed to open " << std::filesystem::absolute(_keyboardDescriptor) << std::endl;
+        std::cerr << "Could not open keyboard device " << _keyboardDescriptor << std::endl;
+        return false;
+    }
+
+    if (!_callback)
+    {
+        std::cerr << "Callback for device " << _keyboardDescriptor << " not set" << std::endl;
+        return false;
+    }
+
+    if (const details::FileDescriptor fd { ::open(_keyboardDescriptor.c_str(), O_RDONLY) }; static_cast<int>(fd) < 0)
+    {
+        std::cerr << "Failed to open " << _keyboardDescriptor << std::endl;
         return false;
     }
 
@@ -54,16 +62,24 @@ void KeyboardMonitor::Stop()
         _thread.join();
 }
 
+void KeyboardMonitor::RegisterEventCallback(std::function<void(Event&&)>&& callback)
+{
+    if (_running)
+    {
+        std::cerr << "Unable to register event callback after running" << std::endl;
+        return;
+    }
+
+    _callback = std::move(callback);
+}
+
 void KeyboardMonitor::Worker()
 {
     std::cout << "KeyboardMonitor::Worker()" << std::endl;
 
-    // ev.value
-    static const std::array<std::string, 3> eventsNames { "RELEASED", "PRESSED ", "REPEATED" };
-
     while (_running)
     {
-        const int fd = ::open(std::filesystem::absolute(_keyboardDescriptor).c_str(), O_RDONLY);
+        const int fd = ::open(_keyboardDescriptor.c_str(), O_RDONLY);
         if (fd < 0)
             continue;
         const auto fileDescriptor = details::FileDescriptor { fd };
@@ -83,9 +99,8 @@ void KeyboardMonitor::Worker()
                 break;
             }
 
-            if (ev.type == EV_KEY && ev.value >= 0 && ev.value <= 2)
-                printf("%s 0x%04x (%d)\n", eventsNames[ev.value].c_str(), static_cast<int>(ev.code),
-                       static_cast<int>(ev.code));
+            if (_callback && ev.type == EV_KEY && ev.value >= 0 && ev.value <= 2)
+                _callback(Event { EventType { ev.value }, ev.code });
         }
     }
 }
